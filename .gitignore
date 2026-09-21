@@ -1,0 +1,25 @@
+﻿# Configuration & Credentials
+telegram.json
+*.env
+*.key
+*.token
+
+# IPC runtime data
+ipc/*.json
+ipc/*.tmp
+!ipc/.gitkeep
+
+# Logs & Diagnostics
+*.log
+*.dump
+
+# Python runtime
+__pycache__/
+*.py[cod]
+*.class
+.pytest_cache/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
