@@ -167,3 +167,9 @@ Write-Host "Разработчик ответил: $reply"
 ## 📄 Лицензия
 
 Проект распространяется под лицензией **MIT**. Разрешено свободное использование в личных и коммерческих проектах.
+
+---
+
+## English summary
+
+An AI agent skill that lets coding agents (Codex, Claude Code, Antigravity, Cursor, Windsurf and others) send structured task reports to Telegram as Rich Messages via the Telegram Bot API, with long logs hidden under spoilers and log files attached. It also supports human-in-the-loop: the agent can ask a question with buttons or wait for your text reply from your phone. It runs on Windows PowerShell plus plain Python 3 with no external dependencies and only accepts messages from your own chat_id. To use it, put the folder (with SKILL.md) in your agent's skills directory, e.g. ~/.codex/skills/telegram-notify/ or ~/.claude/skills/telegram-notify/, and add your bot token and chat ID to telegram.json.
