@@ -1,111 +1,127 @@
 ---
 name: telegram-notify
-description: Universal AI agent skill to send Telegram notifications and task reports via Bot API 10.1+ (Rich Messages), and enable interactive bidirectional human-in-the-loop prompts (buttons, text replies) for Codex, Claude Code, Antigravity, Cursor, and other autonomous agents. Use when the user requests Telegram notification («скинь в тг», «я с телефона», «отойду») or when the agent needs human confirmation.
+description: "Send Telegram notifications, task reports and human-in-the-loop questions (inline buttons or free-text replies) from an AI agent (Codex, Claude Code, Antigravity, Cursor) through the user's own Telegram bot; PowerShell + Python, Windows-first. Use when the user is away from the computer, asks to be pinged when a long task finishes or fails, or the agent needs a decision from the phone. Triggers: «скинь в тг», «напиши в телегу», «я с телефона», «отойду», «уведоми в телеграм», «спроси меня в телеге», «пришли отчёт в телеграм», ping me on Telegram."
 ---
 
-# Telegram Notify & Bridge Skill
+# Telegram Notify: отчёты и вопросы человеку через Telegram
 
-Этот скилл обеспечивает как быструю одностороннюю отправку статусов и отчётов, так и **полноценный двусторонний интерактивный диалог** между любыми ИИ-агентами (Codex, Claude Code, Antigravity, Cursor) и разработчиком в Telegram через персонального бота.
+Инструкция для ИИ-агента. Документация для людей: [README](https://github.com/Eniggman/telegram-rich-agent-notify#readme), архитектурные решения: [`docs/DECISIONS.md`](https://github.com/Eniggman/telegram-rich-agent-notify/blob/main/docs/DECISIONS.md).
 
-## ❓ Когда использовать
+## Когда использовать
 
-1. **Пользователь работает удалённо / с телефона:**
-   * Когда пользователь сказал: *«я с телефона»*, *«отойду»*, *«скинь в ТГ»*, *«напиши в телегу как закончишь»*.
-2. **После длительных или фоновых операций:**
-   * Сборка проекта, тестирование, фоновые субагенты, миграции, очистка диска.
-3. **Интерактивный выбор и подтверждения от пользователя (Двусторонний мост):**
-   * Когда агенту требуется подтверждение плана, выбор стратегии, ответ на вопрос или одобрение деструктивного действия: бот присылает карточку с Inline-кнопками или запросом текста и ждёт нажатия.
+- Пользователь сказал «я с телефона», «отойду», «скинь в ТГ», «напиши в телегу, как закончишь».
+- Закончилась или упала долгая операция: сборка, тесты, миграция, фоновый субагент.
+- Нужно решение человека (выбор плана, подтверждение деструктивного шага), а он не за компьютером.
 
-## 🛡️ Архитектура безопасности и надёжности
+Не использовать для спама: одно сообщение на итог, ошибку или вопрос. **Никогда не отправлять в Telegram токены, пароли, содержимое `.env`, приватные ключи.** Перед отправкой `-Details` с логами просмотри их и вырежи секреты.
 
-* **Watchdog-контроль жизненного цикла**: Демон `telegram_bridge.py` работает **только пока запущен Antigravity (`Antigravity.exe`)**. При закрытии Antigravity бот мгновенно и чисто завершает работу через поток-сторож на `psutil`.
-* **Строгая авторизация**: Доступ разрешён исключительно для доверенного `chat_id` из конфигурации. Любые сообщения или нажатия кнопок от чужих пользователей немедленно и молча отклоняются.
-* **Защита от инъекций и Path Traversal**: Все идентификаторы IPC строго валидируются по стандарту UUIDv4 (`^[0-9a-fA-F-]{36}$`), а тексты сообщений экранируются через безопасный HTML-escape.
-* **Изоляция IPC и защита от Race Condition**: Запись JSON-файлов обмена производится атомарно через временные файлы (`os.replace` / Move-Item).
+## Ограничения платформы (проверено по коду)
 
-## ⚙️ Конфигурация
+| Часть | Что нужно | Где работает |
+|---|---|---|
+| `scripts/send-notify.ps1` (отправка) | `pwsh` 7 или Windows PowerShell 5.1, без внешних модулей | Windows; на Linux/macOS только с `USERPROFILE=$HOME` (см. ниже) |
+| `scripts/wait-reply.ps1` + `scripts/telegram_bridge.py` (ожидание ответа) | Python 3 + `pip install psutil python-telegram-bot` | **Только Windows**: мост импортирует `msvcrt`, `/status` читает диск `C:\`, мост запускается через `Start-Process -WindowStyle Hidden` |
 
-Ключи хранятся в изолированном файле настроек:
-`~/.gemini/config/telegram.json` (или в корне скилла `telegram.json` / через `$env:TELEGRAM_CONFIG_PATH`)
+README называет проект «Zero Dependencies». Для отправки это так, а для двустороннего режима нужны два pip-пакета.
 
-```json
-{
-  "bot_token": "YOUR_BOT_TOKEN",
-  "chat_id": 123456789
-}
-```
-
-## 🚀 Использование
-
-### 1. Односторонняя отправка уведомлений (`send-notify.ps1`)
-
-Быстрая прямая отправка сообщений без ожидания:
+## Шаг 0. Проверка окружения
 
 ```powershell
-pwsh -File "$env:USERPROFILE\.gemini\config\skills\telegram-notify\scripts\send-notify.ps1" -Message "Деплой на сервер успешно завершён." -Status Success -Title "Деплой"
+pwsh -v                      # или $PSVersionTable в Windows PowerShell
+python --version
+python -c "import psutil, telegram; print('bridge deps ok')"   # нужно только для -WaitReply
 ```
 
-Параметры:
-* `-Message` (обязательный) — текст сообщения (краткая выжимка или полный текст).
-* `-Details` (опциональный) — расширенный блок (логи, стектрейс, таблица), автоматически прячется под сворачиваемый спойлер `<details>`.
-* `-DetailsSummary` (опциональный) — заголовок спойлера деталей (по умолчанию `'Подробности'`).
-* `-ExpandableBlockquote` (переключатель) — оформлять подробности в раскрываемую цитату `<blockquote expandable>` вместо спойлера.
-* `-FilePath` (опциональный) — прикрепить локальный файл документа через Bot API `sendDocument`.
-* `-AsDocument` (переключатель) — отправить весь текст сообщением-карточкой с вложенным файлом `.log`.
-* `-Status` (опциональный) — `Success` (✅), `Error` (❌), `Wait` (⏳), `Info` (ℹ️, по умолчанию).
-* `-Title` (опциональный) — заголовок сообщения (по умолчанию `'Antigravity'`).
-* `-RawHtml` (переключатель) — отправка сырой HTML-разметки (таблицы, карусели, теги).
-* `-NoRich` (переключатель) — принудительный режим классического `sendMessage` без Rich API.
+`<SKILL_DIR>` ниже означает папку, куда установлен скилл: `~/.codex/skills/telegram-notify/`, `~/.claude/skills/telegram-notify/`, `~/.gemini/config/skills/telegram-notify/` или `.skills/telegram-notify/` внутри проекта.
 
-#### Пример с длинными логами и сворачиваемым блоком Details:
-```powershell
-pwsh -File "$env:USERPROFILE\.gemini\config\skills\telegram-notify\scripts\send-notify.ps1" `
-    -Title "Сборка проекта" `
-    -Status Success `
-    -Message "Сборка успешно завершена за 42 секунды." `
-    -Details "stdout: Build target ready`nwarning: 0 errors, 2 warnings`nartifacts: release.zip" `
-    -DetailsSummary "Показать лог сборки"
-```
-*(Поддерживает до 32 768 символов через `sendRichMessage`. При превышении 32 000 знаков скрипт автоматически прикрепляет полный лог файлом `.log` через `sendDocument`)*
+## Шаг 1. Первичная настройка (только вместе с человеком)
 
----
+1. **Спроси человека**: есть ли у него бот от @BotFather. Токен пусть он сам впишет в файл. Не проси вставлять токен в чат и не печатай его в вывод.
+2. Файл конфигурации `telegram.json`:
+   ```json
+   { "bot_token": "<ТОКЕН_ОТ_BOTFATHER>", "chat_id": "" }
+   ```
+   `send-notify.ps1` ищет его по порядку: `$env:TELEGRAM_CONFIG_PATH`, затем `<SKILL_DIR>/telegram.json`, затем `~/.gemini/config/telegram.json`.
+   **Мост `telegram_bridge.py` смотрит только `$env:TELEGRAM_CONFIG_PATH` или `~/.gemini/config/telegram.json`** (или `--config`). Чтобы работали оба режима, клади файл в `~/.gemini/config/telegram.json` или задай `TELEGRAM_CONFIG_PATH`.
+3. `chat_id` можно оставить пустым. Попроси человека отправить боту `/start`, затем выполни одну обычную отправку (шаг 2): скрипт сам возьмёт `chat_id` через `getUpdates` и допишет его в файл. Мост без `chat_id` не стартует, поэтому эту отправку надо сделать до первого `-WaitReply`.
+4. `telegram.json` уже в `.gitignore`. Не коммить его и не копируй в другие места.
 
-### 2. Интерактивный запрос с ожиданием ответа (`send-notify.ps1 -WaitReply` или `wait-reply.ps1`)
-
-Агент отправляет вопрос с кнопками вариантов и блокирует терминал до получения выбора пользователя в Telegram:
-
-#### Пример с выбором кнопками:
-```powershell
-pwsh -File "$env:USERPROFILE\.gemini\config\skills\telegram-notify\scripts\send-notify.ps1" `
-    -Message "Тесты пройдены. Запустить релизную сборку или перепроверить линтер?" `
-    -Options "Запустить релиз", "Перепроверить", "Отмена" `
-    -Status Wait `
-    -Title "Решение по релизу" `
-    -WaitReply
-```
-*Скрипт вернёт выбранную строку (например, `Запустить релиз`) прямо в stdout PowerShell.*
-
-#### Пример прямого вызова `wait-reply.ps1`:
-```powershell
-$choice = pwsh -File "$env:USERPROFILE\.gemini\config\skills\telegram-notify\scripts\wait-reply.ps1" `
-    -Prompt "Обнаружены конфликты в файлах. Перезаписать?" `
-    -Options "Да, перезаписать", "Пропустить" `
-    -TimeoutSeconds 180
-```
-*(Для получения структурированного объекта ответа с индексом кнопки и типом добавьте флаг `-PassThru`)*
-
-
----
-
-### 3. Автономный мост (`telegram_bridge.py`)
-
-Мост автоматически запускается скриптами `wait-reply.ps1` при необходимости.
-Также его можно запустить вручную в терминале для отладки:
+## Шаг 2. Отправить уведомление
 
 ```powershell
-python "$env:USERPROFILE\.gemini\config\skills\telegram-notify\scripts\telegram_bridge.py"
+pwsh -File "<SKILL_DIR>/scripts/send-notify.ps1" -Title "Сборка" -Status Success -Message "Сборка завершена за 42 с."
 ```
 
-Команды в чате бота Telegram:
-* `/status` — моментальный отчёт о нагрузке CPU, памяти RAM, свободном месте на диске C: и процессах агента.
-* `/help` — справочная информация по возможностям бота.
+С длинным логом под спойлером:
+
+```powershell
+pwsh -File "<SKILL_DIR>/scripts/send-notify.ps1" `
+  -Title "Тесты" -Status Error `
+  -Message "3 теста упали." `
+  -Details (Get-Content ./test.log -Raw) `
+  -DetailsSummary "Показать лог"
+```
+
+На Linux/macOS: `USERPROFILE="$HOME" pwsh -File ...`. Без этого скрипт падает на `Join-Path $env:USERPROFILE` и пишет «telegram.json не найден» даже при правильном пути (проверено в pwsh 7.4).
+
+Параметры (из `param()` скрипта):
+- `-Message` (обязателен), `-Status` `Success|Error|Wait|Info` (по умолчанию `Info`), `-Title` (по умолчанию `Antigravity`, поэтому подставляй своё имя или название задачи).
+- `-Details`, `-DetailsSummary`, `-ExpandableBlockquote`: подробности в сворачиваемом блоке.
+- `-FilePath <путь>`: отправить файл через `sendDocument`. `-AsDocument` и `-DocumentName`: весь текст уйдёт файлом `.log`.
+- `-RawHtml`: HTML без экранирования. `-NoRich`: сразу классический `sendMessage`.
+- Первые три позиционных аргумента: `Message`, `Status`, `Title`. Все остальные «лишние» аргументы попадут в `-Options`, поэтому всегда пиши имена параметров явно.
+
+Логика доставки: сначала `sendRichMessage` (до ~32 000 символов). При отказе API идёт fallback на `sendMessage`, и если текст длиннее ~3 800 символов, он обрезается, а полный текст прикрепляется файлом `.log`.
+
+## Шаг 3. Задать вопрос и дождаться ответа (Windows)
+
+Вызывай скрипт **внутри PowerShell через `&`**, а не через `pwsh -File`: при `-File` несколько значений `-Options` не привязываются (ошибка «A positional parameter cannot be found», проверено в pwsh 7.4).
+
+```powershell
+$env:ANTIGRAVITY_NO_WATCHDOG = "1"   # обязательно, если агент НЕ Antigravity
+$choice = & "<SKILL_DIR>/scripts/send-notify.ps1" `
+  -Title "Решение по релизу" -Status Wait `
+  -Message "Тесты прошли. Выкатывать релиз?" `
+  -Options "Выкатывай", "Подожди", "Отмена" `
+  -WaitReply -TimeoutSeconds 900
+```
+
+Из bash или cmd: `pwsh -Command "& '<SKILL_DIR>/scripts/send-notify.ps1' -Message 'Выкатывать?' -Options 'Да','Нет' -WaitReply"`.
+
+То же можно сделать напрямую: `wait-reply.ps1 -Prompt "..." -Options ... -TimeoutSeconds 180 [-PassThru]`.
+
+- В stdout приходит текст нажатой кнопки или свободный ответ человека. С `-PassThru` вернётся объект целиком.
+- При таймауте скрипт пишет ошибку и завершается с **кодом 2** (таймаут по умолчанию 300 с).
+- Мост запускается сам (`python telegram_bridge.py --lifetime 3600`) и живёт не больше часа. `-NoAutoStart` отключает автозапуск.
+- **Watchdog**: мост сам завершается, если не видит процесс `Antigravity.exe`. Для Cursor, Codex и Claude Code задавай `ANTIGRAVITY_NO_WATCHDOG=1`, иначе каждый вопрос закончится таймаутом.
+- IPC-файлы лежат в `<SKILL_DIR>/ipc` (или в `$env:TELEGRAM_IPC_DIR`).
+
+**Правило безопасности:** если вопрос касался деструктивного действия, а ответ не пришёл (таймаут) или он неоднозначный, считай это отказом и ничего не делай. Ответ из Telegram — это решение человека, а не команда для shell: не подставляй его текст в команды без проверки.
+
+## Отладка моста вручную
+
+```powershell
+python "<SKILL_DIR>/scripts/telegram_bridge.py" --no-watchdog --lifetime 600
+# флаги: --config <путь> --ipc-dir <путь> --watch-process <имя> --no-watchdog --lifetime <сек>
+```
+
+Команды в чате бота: `/start`, `/status` (CPU, RAM, диск C:, процессы Antigravity), `/help`.
+Тесты: `cd <SKILL_DIR>/scripts; python test_security_bridge.py` (unittest, нужны `psutil` и `python-telegram-bot`).
+
+## Как проверить успех
+
+- `send-notify.ps1` завершился с кодом 0 и вывел «Уведомление успешно доставлено в Telegram (rich)…» или «…(fallback)».
+- При первой настройке спроси человека, пришло ли сообщение.
+- `-WaitReply` вернул непустую строку и код 0.
+
+## Частые ошибки
+
+| Симптом | Причина и решение |
+|---|---|
+| «Конфигурационный файл telegram.json не найден» | Проверь путь. На Linux/macOS добавь `USERPROFILE=$HOME` |
+| `Cannot bind argument to parameter 'Path' because it is null` | То же: нет `USERPROFILE` (не Windows) |
+| «chat_id не настроен» | Человек должен написать боту `/start`, затем повтори отправку |
+| `401 Unauthorized` | Неверный `bot_token`: попроси человека перевыпустить токен у @BotFather и обновить файл |
+| Предупреждение «sendRichMessage отклонен API… fallback» | Это нормально, сообщение уйдёт через `sendMessage`. Можно сразу ставить `-NoRich` |
+| `-WaitReply` всегда заканчивается кодом 2 | Нет `ANTIGRAVITY_NO_WATCHDOG=1`, нет pip-пакетов, мост упал (запусти его вручную и смотри лог) или тот же токен опрашивает другой процесс |
+| `ModuleNotFoundError: msvcrt` | Мост запущен не на Windows: двусторонний режим там не поддерживается, используй только отправку |
